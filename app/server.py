@@ -76,16 +76,16 @@ def run_query(query):
 with open('api_key.json') as config_file:
     config = json.load(config_file)
 #GROQ SETUP---------------------------------------------------------------------------------------------
-# groq_api_key=config['groq_api_key']
-# llm = ChatGroq(
-#             groq_api_key=groq_api_key, 
-#             model_name="llama3-8b-8192"
-#     )
+groq_api_key=config['groq_api_key']
+llm = ChatGroq(
+            groq_api_key=groq_api_key, 
+            model_name="llama3-8b-8192"
+    )
 #-------------------------------------------------------------------------------------------------------
 
 #COHERE SETUP--------------------------------------------------------------------------
-cohere_api_key=config['cohere_api_key']
-llm = ChatCohere(model="command-r-plus", cohere_api_key=cohere_api_key)
+# cohere_api_key=config['cohere_api_key']
+# llm = ChatCohere(model="command-r-plus", cohere_api_key=cohere_api_key)
 #--------------------------------------------------------------------------------------
 
 
