@@ -9,6 +9,7 @@ st.set_page_config(
   layout='wide',
   page_icon='📜'
 )
+st.title('Je suis Kangam🧠🦾, ton agent, expert en detection de fraude, as-tu des questions sur tes données ?')
 
 # # Initialize chat history
 if "messages" not in st.session_state:
@@ -26,14 +27,16 @@ if prompt := st.chat_input("What is up?"):
         st.markdown(prompt)
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
-    
-resp = llm.invoke({"question": prompt},
+  
+if prompt != None:
+      
+    resp = llm.invoke({"question": prompt},
                         config={"configurable": {"session_id": "123"}},)
     
-response = resp.content
+    response = resp.content
 # print(prompt)
 # Display assistant response in chat message container
-with st.chat_message("assistant"):
-    st.markdown(response)
-# Add assistant response to chat history
-st.session_state.messages.append({"role": "assistant", "content": response})
+    with st.chat_message("assistant"):
+        st.markdown(response)
+    # Add assistant response to chat history
+    st.session_state.messages.append({"role": "assistant", "content": response})
