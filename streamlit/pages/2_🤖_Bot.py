@@ -9,7 +9,7 @@ st.set_page_config(
   layout='wide',
   page_icon='📜'
 )
-st.title('Je suis Kangam🧠🦾, ton agent, expert en detection de fraude, as-tu des questions sur tes données ?')
+st.title('🧠 Discutez avec Kangam 🦾')
 
 # # Initialize chat history
 if "messages" not in st.session_state:
