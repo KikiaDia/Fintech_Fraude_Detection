@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import requests
+import io
 
 st.set_page_config(
   page_title='API',
@@ -22,7 +24,19 @@ with tab1:
         df = pd.read_csv(uploaded_file)
         st.data_editor(df, use_container_width=True)
         st.toast("Fichier uploader avec succès", icon='✅')
+        output_buffer = io.StringIO()
+        df.to_csv(output_buffer, index=False)
+        output_buffer.seek(0)
+        files = {'file': ("upload.csv", output_buffer)}
+        endpoint = 'http://localhost:8000/api/anomaly-detection/file'
+        response = requests.post(endpoint, files=files)
+        if response.status_code == 200:
+          content_io = io.BytesIO(response.content)
+          st.success("Affichage du résultat en cours", icon='🦾')
+          df2 = pd.read_csv(content_io)
+          st.data_editor(df2, use_container_width=True)
     except Exception as e:
+      print(e)
       st.toast("N'uploadez que des fichiers csv", icon='❌')
 
 with tab2:

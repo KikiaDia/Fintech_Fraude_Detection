@@ -1,15 +1,21 @@
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
-from langserve import add_routes
-
-
+from fastapi.exceptions import HTTPException
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-
-
-
+from utils.preprocess_data import process_client, process_distro
+import joblib
+import pandas as pd
+import io
+from fastapi.requests import Request
 from langserve import add_routes
+from fastapi.encoders import jsonable_encoder
+
+
+
+import warnings
+warnings.filterwarnings("ignore")
 
 
 #LANGCHAIN--------------------------------------------------------------------------
@@ -227,6 +233,119 @@ chain_with_history = RunnableWithMessageHistory(
 add_routes(app, 
            chain_with_history,
            path="/bot",)
+
+
+#Anomaly Detection --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+LABEL_ENCODER_DISTRO = joblib.load("models/distributeur/distro_encoder.joblib")
+LABEL_SCALER_DISTRO = joblib.load("models/distributeur/distro_scaler.joblib")
+
+LABEL_ENCODER_CLIENT = joblib.load("models/client/client_encoder.joblib")
+LABEL_SCALER_CLIENT = joblib.load("models/client/client_scaler.joblib")
+
+DISTRO_MODEL = joblib.load("models/distributeur/distro_anomaly_detection.joblib")
+CLIENT_MODEL = joblib.load("models/client/client_anomaly_detection.joblib")
+
+ALLOWED_EXTENSIONS = ['xlsx', 'xls', 'json', 'csv']
+COLUMNS_DISTRO = ['Montant','CashIn_AvgAmount','CashOut_AvgAmount']
+COLUMNS_CLIENT = ['Montant']
+
+@app.post('/api/anomaly-detection/file')
+async def get_anomalies(request: Request):
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(status_code=400, detail="Il n'y a pas de fichier.")
+    filename = file.filename
+    if not filename.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
+        raise HTTPException(status_code=422, detail="Le format du fichier est invalide. Veuillez fournir un fichier JSON, EXCEL ou CSV")
+    file_content = await file.read()
+    file_like_object = io.BytesIO(file_content)
+    try:
+        if filename.lower().endswith('.json'):
+            df = pd.read_json(file_like_object)
+        elif filename.lower().endswith('.xlsx') or filename.lower().endswith('.xls'):
+            df = pd.read_excel(file_like_object)
+        else:
+            df = pd.read_csv(file_like_object)
+        df["Destination"] = df["Destination"].astype(str)
+        df = df[~df["Origine"].isin(["Wallet Appro Sous Distributeurs"])]
+        df = df[~df["Destination"].isin(["Wallet Appro Sous Distributeurs"])]
+        df.dropna(inplace=True)
+        df_client = df[~df['Type'].isin(['CASHIN', 'CASHOUT'])]
+        df_distro = df[~df['Type'].isin(['P2P', 'PAYMENT'])]
+        preprocess_client = process_client(LABEL_ENCODER_CLIENT, LABEL_SCALER_CLIENT, df_client)
+        preprocess_distro = process_distro(LABEL_ENCODER_DISTRO, LABEL_SCALER_DISTRO, df_distro)
+
+        outliers_client = CLIENT_MODEL.predict(preprocess_client)
+        outliers_distro = DISTRO_MODEL.predict(preprocess_distro)
+
+        preprocess_client["Outliers"] = outliers_client
+        preprocess_distro["Outliers"] = outliers_distro
+
+        preprocess_client[COLUMNS_CLIENT] = LABEL_SCALER_CLIENT.inverse_transform(preprocess_client[COLUMNS_CLIENT])
+        preprocess_distro[COLUMNS_DISTRO] = LABEL_SCALER_DISTRO.inverse_transform(preprocess_distro[COLUMNS_DISTRO])
+        preprocess_client["Type"] = LABEL_ENCODER_CLIENT.inverse_transform(preprocess_client["Type"])
+        preprocess_client['Timestamp'] = pd.to_datetime(preprocess_client[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
+        preprocess_distro["Type"] = LABEL_ENCODER_DISTRO.inverse_transform(preprocess_distro["Type"])
+        preprocess_distro['Timestamp'] = pd.to_datetime(preprocess_client[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
+
+        combined_df = pd.concat([preprocess_client, preprocess_distro])
+        combined_df.sort_index(inplace=True)
+        combined_df = combined_df[["Timestamp","Type","Montant","Origine","Destination","Montant","Outliers"]]
+
+        output = io.BytesIO()
+        combined_df.to_csv(output, index=False)
+        output.seek(0)
+
+        return StreamingResponse(output, media_type="text/csv")
+    except Exception as e:
+        return HTTPException(status_code=500, detail={"error": repr(e)})
+
+@app.post('/api/anomaly-detection/batch')   
+async def get_anomalies(request: Request):
+    data = await request.json()
+    if not isinstance(data, list):
+        raise HTTPException(status_code=422, detail="Le format du fichier est invalide. Il faut une liste de JSONs")
+    try:
+        df = pd.DataFrame(data)
+        df["Destination"] = df["Destination"].astype(str)
+        df = df[~df["Origine"].isin(["Wallet Appro Sous Distributeurs"])]
+        df = df[~df["Destination"].isin(["Wallet Appro Sous Distributeurs"])]
+        df.dropna(inplace=True)
+        df_client = df[~df['Type'].isin(['CASHIN', 'CASHOUT'])]
+        df_distro = df[~df['Type'].isin(['P2P', 'PAYMENT'])]
+        preprocess_client = process_client(LABEL_ENCODER_CLIENT, LABEL_SCALER_CLIENT, df_client)
+        preprocess_distro = process_distro(LABEL_ENCODER_DISTRO, LABEL_SCALER_DISTRO, df_distro)
+
+        outliers_client = CLIENT_MODEL.predict(preprocess_client)
+        outliers_distro = DISTRO_MODEL.predict(preprocess_distro)
+
+        preprocess_client["Outliers"] = outliers_client
+        preprocess_distro["Outliers"] = outliers_distro
+
+        preprocess_client[COLUMNS_CLIENT] = LABEL_SCALER_CLIENT.inverse_transform(preprocess_client[COLUMNS_CLIENT])
+        preprocess_distro[COLUMNS_DISTRO] = LABEL_SCALER_DISTRO.inverse_transform(preprocess_distro[COLUMNS_DISTRO])
+        preprocess_client["Type"] = LABEL_ENCODER_CLIENT.inverse_transform(preprocess_client["Type"])
+        preprocess_client['Timestamp'] = pd.to_datetime(preprocess_client[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
+        preprocess_distro["Type"] = LABEL_ENCODER_DISTRO.inverse_transform(preprocess_distro["Type"])
+        preprocess_distro['Timestamp'] = pd.to_datetime(preprocess_client[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
+
+        combined_df = pd.concat([preprocess_client, preprocess_distro])
+        combined_df.sort_index(inplace=True)
+        combined_df = combined_df[["Timestamp","Type","Montant","Origine","Destination","Montant","Outliers"]]
+
+        output = io.BytesIO()
+        combined_df.to_csv(output, index=False)
+        output.seek(0)
+
+        return StreamingResponse(output, media_type="text/csv")
+    except Exception as e:
+        return HTTPException(status_code=500, detail={"error": repr(e)})
+#---------------------------------------------------------------------------------------------------------------------------------------   
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 if __name__ == "__main__":
     import uvicorn
