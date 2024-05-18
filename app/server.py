@@ -4,7 +4,7 @@ from fastapi.exceptions import HTTPException
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from app.utils.preprocess_data import process_client, process_distro
+from app.utils.preprocess_data import process_dataframe
 import joblib
 import pandas as pd
 import io
@@ -234,20 +234,13 @@ add_routes(app,
 
 #Anomaly Detection --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-LABEL_ENCODER_DISTRO = joblib.load("app/models/distributeur/distro_encoder.joblib")
-LABEL_SCALER_DISTRO = joblib.load("app/models/distributeur/distro_scaler.joblib")
+LABEL_ENCODER = joblib.load("app/models/encoder.joblib")
+SCALER = joblib.load("app/models/scaler.joblib")
 
-LABEL_ENCODER_CLIENT = joblib.load("app/models/client/client_encoder.joblib")
-LABEL_SCALER_CLIENT = joblib.load("app/models/client/client_scaler.joblib")
-
-# DISTRO_MODEL = joblib.load("app/models/distributeur/distro_anomaly_detection.joblib")
-# CLIENT_MODEL = joblib.load("app/models/client/client_anomaly_detection.joblib")
-DISTRO_MODEL = IsolationForest(contamination=0.05)
-CLIENT_MODEL = IsolationForest(contamination=0.05)
+MODEL = IsolationForest(contamination=0.05)
 
 ALLOWED_EXTENSIONS = ['xlsx', 'xls', 'json', 'csv']
-COLUMNS_DISTRO = ['Montant','CashIn_AvgAmount','CashOut_AvgAmount']
-COLUMNS_CLIENT = ['Montant']
+COLUMNS = ['Montant','CashIn_AvgAmount','CashOut_AvgAmount','P2P_Out_AvgAmount','PAYMENT_Out_AvgAmount','P2P_In_AvgAmount','PAYMENT_In_AvgAmount']
 
 @app.post('/api/anomaly-detection/file')
 async def get_anomalies(request: Request):
@@ -271,51 +264,31 @@ async def get_anomalies(request: Request):
         df = df[~df["Origine"].isin(["Wallet Appro Sous Distributeurs"])]
         df = df[~df["Destination"].isin(["Wallet Appro Sous Distributeurs"])]
         df.dropna(inplace=True)
-        df_client = df[~df['Type'].isin(['CASHIN', 'CASHOUT'])]
-        df_distro = df[~df['Type'].isin(['P2P', 'PAYMENT'])]
 
-        preprocess_client = process_client(LABEL_ENCODER_CLIENT, LABEL_SCALER_CLIENT, df_client)
-        preprocess_distro = process_distro(LABEL_ENCODER_DISTRO, LABEL_SCALER_DISTRO, df_distro)
+        preprocess = process_dataframe(LABEL_ENCODER, SCALER, df)
 
-        if preprocess_distro is not None:
-            DISTRO_MODEL.fit(preprocess_distro)
-            outliers_distro = DISTRO_MODEL.predict(preprocess_distro)
+        if preprocess is not None:
+            MODEL.fit(preprocess)
+            outliers = MODEL.predict(preprocess)
         else:
-            outliers_distro = None
+            outliers = None
         
-        if preprocess_client is not None:
-            CLIENT_MODEL.fit(preprocess_client)
-            outliers_client = CLIENT_MODEL.predict(preprocess_client)
-        else:
-            outliers_client = None
-        if outliers_client is not None:
-            preprocess_client["Outliers"] = outliers_client
-            preprocess_client[COLUMNS_CLIENT] = LABEL_SCALER_CLIENT.inverse_transform(preprocess_client[COLUMNS_CLIENT])
-            preprocess_client["Type"] = LABEL_ENCODER_CLIENT.inverse_transform(preprocess_client["Type"])
-            preprocess_client['Timestamp'] = pd.to_datetime(preprocess_client[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
-        
-        if outliers_distro is not None:
-            preprocess_distro["Outliers"] = outliers_distro
-            preprocess_distro[COLUMNS_DISTRO] = LABEL_SCALER_DISTRO.inverse_transform(preprocess_distro[COLUMNS_DISTRO])
-            preprocess_distro["Type"] = LABEL_ENCODER_DISTRO.inverse_transform(preprocess_distro["Type"])
-            preprocess_distro['Timestamp'] = pd.to_datetime(preprocess_distro[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
+        if outliers is not None:
+            preprocess["Outliers"] = outliers
+            preprocess[COLUMNS] = SCALER.inverse_transform(preprocess[COLUMNS])
+            preprocess["Type"] = LABEL_ENCODER.inverse_transform(preprocess["Type"])
+            preprocess['Timestamp'] = pd.to_datetime(preprocess[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
 
-        if preprocess_client is not None and preprocess_distro is not None:
-            combined_df = pd.concat([preprocess_client, preprocess_distro])
-        elif preprocess_client is None:
-            combined_df = preprocess_distro
-        elif preprocess_distro is None:
-            combined_df = preprocess_client
-
-        combined_df.sort_index(inplace=True)
-        combined_df = combined_df[["Timestamp","Type","Montant","Origine","Destination","Outliers"]]
+        preprocess.sort_index(inplace=True)
+        preprocess = preprocess[["Timestamp","Type","Montant","Origine","Destination","Outliers"]]
 
         output = io.BytesIO()
-        combined_df.to_csv(output, index=False)
+        preprocess.to_csv(output, index=False)
         output.seek(0)
 
         return StreamingResponse(output, media_type="text/csv")
     except Exception as e:
+        print(e)
         return HTTPException(status_code=500, detail={"error": repr(e)})
 
 @app.post('/api/anomaly-detection/batch')   
@@ -329,46 +302,26 @@ async def get_anomalies(request: Request):
         df = df[~df["Origine"].isin(["Wallet Appro Sous Distributeurs"])]
         df = df[~df["Destination"].isin(["Wallet Appro Sous Distributeurs"])]
         df.dropna(inplace=True)
-        df_client = df[~df['Type'].isin(['CASHIN', 'CASHOUT'])]
-        df_distro = df[~df['Type'].isin(['P2P', 'PAYMENT'])]
 
-        preprocess_client = process_client(LABEL_ENCODER_CLIENT, LABEL_SCALER_CLIENT, df_client)
-        preprocess_distro = process_distro(LABEL_ENCODER_DISTRO, LABEL_SCALER_DISTRO, df_distro)
+        preprocess = process_dataframe(LABEL_ENCODER, SCALER, df)
 
-        if preprocess_distro is not None:
-            outliers_distro = DISTRO_MODEL.predict(preprocess_distro)
+        if preprocess is not None:
+            MODEL.fit(preprocess)
+            outliers = MODEL.predict(preprocess)
         else:
-            outliers_distro = None
+            outliers = None
         
-        if preprocess_client is not None:
-            outliers_client = CLIENT_MODEL.predict(preprocess_client)
-        else:
-            outliers_client = None
+        if outliers is not None:
+            preprocess["Outliers"] = outliers
+            preprocess[COLUMNS] = SCALER.inverse_transform(preprocess[COLUMNS])
+            preprocess["Type"] = LABEL_ENCODER.inverse_transform(preprocess["Type"])
+            preprocess['Timestamp'] = pd.to_datetime(preprocess[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
 
-        if outliers_client is not None:
-            preprocess_client["Outliers"] = outliers_client
-            preprocess_client[COLUMNS_CLIENT] = LABEL_SCALER_CLIENT.inverse_transform(preprocess_client[COLUMNS_CLIENT])
-            preprocess_client["Type"] = LABEL_ENCODER_CLIENT.inverse_transform(preprocess_client["Type"])
-            preprocess_client['Timestamp'] = pd.to_datetime(preprocess_client[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
-        
-        if outliers_distro is not None:
-            preprocess_distro["Outliers"] = outliers_distro
-            preprocess_distro[COLUMNS_DISTRO] = LABEL_SCALER_DISTRO.inverse_transform(preprocess_distro[COLUMNS_DISTRO])
-            preprocess_distro["Type"] = LABEL_ENCODER_DISTRO.inverse_transform(preprocess_distro["Type"])
-            preprocess_distro['Timestamp'] = pd.to_datetime(preprocess_distro[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
-
-        if preprocess_client is not None and preprocess_distro is not None:
-            combined_df = pd.concat([preprocess_client, preprocess_distro])
-        elif preprocess_client is None:
-            combined_df = preprocess_distro
-        elif preprocess_distro is None:
-            combined_df = preprocess_client
-
-        combined_df.sort_index(inplace=True)
-        combined_df = combined_df[["Timestamp","Type","Montant","Origine","Destination","Outliers"]]
+        preprocess.sort_index(inplace=True)
+        preprocess = preprocess[["Timestamp","Type","Montant","Origine","Destination","Outliers"]]
 
         output = io.BytesIO()
-        combined_df.to_csv(output, index=False)
+        preprocess.to_csv(output, index=False)
         output.seek(0)
 
         return StreamingResponse(output, media_type="text/csv")
