@@ -9,7 +9,7 @@ st.set_page_config(
   layout='wide',
   page_icon='📜'
 )
-st.title('Je suis Kangam🧠🦾, ton agent, expert en detection de fraude, as-tu des questions sur tes données ?')
+st.title('🧠 Discutez avec Kangam 🦾')
 
 # # Initialize chat history
 if "messages" not in st.session_state:
@@ -21,7 +21,7 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
         
 # React to user input
-if prompt := st.chat_input("What is up?"):
+if prompt := st.chat_input("What's up ?"):
     # Display user message in chat message container
     with st.chat_message("user"):
         st.markdown(prompt)
