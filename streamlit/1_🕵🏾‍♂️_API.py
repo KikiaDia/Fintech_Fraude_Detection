@@ -34,6 +34,7 @@ with tab1:
         files = {'file': ("upload.csv", output_buffer)}
         endpoint = 'http://localhost:8000/api/anomaly-detection/file'
         response = requests.post(endpoint, files=files)
+        print(response)
         if response.status_code == 200:
           content_io = io.BytesIO(response.content)
           st.success("Affichage du résultat en cours", icon='🦾')
