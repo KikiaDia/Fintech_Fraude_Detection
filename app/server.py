@@ -240,10 +240,10 @@ LABEL_SCALER_DISTRO = joblib.load("app/models/distributeur/distro_scaler.joblib"
 LABEL_ENCODER_CLIENT = joblib.load("app/models/client/client_encoder.joblib")
 LABEL_SCALER_CLIENT = joblib.load("app/models/client/client_scaler.joblib")
 
-DISTRO_MODEL = joblib.load("app/models/distributeur/distro_anomaly_detection.joblib")
-CLIENT_MODEL = joblib.load("app/models/client/client_anomaly_detection.joblib")
-# DISTRO_MODEL = IsolationForest(contamination=0.05)
-# CLIENT_MODEL = IsolationForest(contamination=0.05)
+# DISTRO_MODEL = joblib.load("app/models/distributeur/distro_anomaly_detection.joblib")
+# CLIENT_MODEL = joblib.load("app/models/client/client_anomaly_detection.joblib")
+DISTRO_MODEL = IsolationForest(contamination=0.05)
+CLIENT_MODEL = IsolationForest(contamination=0.05)
 
 ALLOWED_EXTENSIONS = ['xlsx', 'xls', 'json', 'csv']
 COLUMNS_DISTRO = ['Montant','CashIn_AvgAmount','CashOut_AvgAmount']
@@ -278,11 +278,13 @@ async def get_anomalies(request: Request):
         preprocess_distro = process_distro(LABEL_ENCODER_DISTRO, LABEL_SCALER_DISTRO, df_distro)
 
         if preprocess_distro is not None:
+            DISTRO_MODEL.fit(preprocess_distro)
             outliers_distro = DISTRO_MODEL.predict(preprocess_distro)
         else:
             outliers_distro = None
         
         if preprocess_client is not None:
+            CLIENT_MODEL.fit(preprocess_client)
             outliers_client = CLIENT_MODEL.predict(preprocess_client)
         else:
             outliers_client = None
