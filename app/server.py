@@ -10,7 +10,7 @@ import pandas as pd
 import io
 from fastapi.requests import Request
 from langserve import add_routes
-from fastapi.encoders import jsonable_encoder
+from sklearn.ensemble import IsolationForest
 
 
 
@@ -110,6 +110,7 @@ Based on the table schema below, write a SQL query that would answer the user's 
     Timestamp: The  date and time the transaction was done
     Origine: The id of the one who transfered or sent money to the other party
     Destination: The id of the one who received money from the other party
+    Outliers: Determines whether the transaction is suspect (fraudulent) or normal, takes -1 for suspect and 1 for normal
     Responds with few word. Don't start your answer with ' Sure! Here is ....'. Give only the sql query, answer directly
 
 
@@ -181,6 +182,7 @@ Like in this example SQL query returning NULL results:
     Timestamp: The date and time the transaction was done
     Origine: The id of the one who transfered or sent money to the other party
     Destination: The id of the one who received money from the other party
+    Outliers: Determines whether the transaction is suspect (fraudulent) or normal, takes -1 for suspect and 1 for normal
     Responds with few word. Don't start your answer with ' Sure! Here is ....'. Give only the sql query, answer directly
 
 
@@ -240,6 +242,8 @@ LABEL_SCALER_CLIENT = joblib.load("app/models/client/client_scaler.joblib")
 
 DISTRO_MODEL = joblib.load("app/models/distributeur/distro_anomaly_detection.joblib")
 CLIENT_MODEL = joblib.load("app/models/client/client_anomaly_detection.joblib")
+# DISTRO_MODEL = IsolationForest(contamination=0.05)
+# CLIENT_MODEL = IsolationForest(contamination=0.05)
 
 ALLOWED_EXTENSIONS = ['xlsx', 'xls', 'json', 'csv']
 COLUMNS_DISTRO = ['Montant','CashIn_AvgAmount','CashOut_AvgAmount']
@@ -269,25 +273,40 @@ async def get_anomalies(request: Request):
         df.dropna(inplace=True)
         df_client = df[~df['Type'].isin(['CASHIN', 'CASHOUT'])]
         df_distro = df[~df['Type'].isin(['P2P', 'PAYMENT'])]
+
         preprocess_client = process_client(LABEL_ENCODER_CLIENT, LABEL_SCALER_CLIENT, df_client)
         preprocess_distro = process_distro(LABEL_ENCODER_DISTRO, LABEL_SCALER_DISTRO, df_distro)
 
-        outliers_client = CLIENT_MODEL.predict(preprocess_client)
-        outliers_distro = DISTRO_MODEL.predict(preprocess_distro)
+        if preprocess_distro is not None:
+            outliers_distro = DISTRO_MODEL.predict(preprocess_distro)
+        else:
+            outliers_distro = None
+        
+        if preprocess_client is not None:
+            outliers_client = CLIENT_MODEL.predict(preprocess_client)
+        else:
+            outliers_client = None
+        if outliers_client is not None:
+            preprocess_client["Outliers"] = outliers_client
+            preprocess_client[COLUMNS_CLIENT] = LABEL_SCALER_CLIENT.inverse_transform(preprocess_client[COLUMNS_CLIENT])
+            preprocess_client["Type"] = LABEL_ENCODER_CLIENT.inverse_transform(preprocess_client["Type"])
+            preprocess_client['Timestamp'] = pd.to_datetime(preprocess_client[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
+        
+        if outliers_distro is not None:
+            preprocess_distro["Outliers"] = outliers_distro
+            preprocess_distro[COLUMNS_DISTRO] = LABEL_SCALER_DISTRO.inverse_transform(preprocess_distro[COLUMNS_DISTRO])
+            preprocess_distro["Type"] = LABEL_ENCODER_DISTRO.inverse_transform(preprocess_distro["Type"])
+            preprocess_distro['Timestamp'] = pd.to_datetime(preprocess_distro[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
 
-        preprocess_client["Outliers"] = outliers_client
-        preprocess_distro["Outliers"] = outliers_distro
+        if preprocess_client is not None and preprocess_distro is not None:
+            combined_df = pd.concat([preprocess_client, preprocess_distro])
+        elif preprocess_client is None:
+            combined_df = preprocess_distro
+        elif preprocess_distro is None:
+            combined_df = preprocess_client
 
-        preprocess_client[COLUMNS_CLIENT] = LABEL_SCALER_CLIENT.inverse_transform(preprocess_client[COLUMNS_CLIENT])
-        preprocess_distro[COLUMNS_DISTRO] = LABEL_SCALER_DISTRO.inverse_transform(preprocess_distro[COLUMNS_DISTRO])
-        preprocess_client["Type"] = LABEL_ENCODER_CLIENT.inverse_transform(preprocess_client["Type"])
-        preprocess_client['Timestamp'] = pd.to_datetime(preprocess_client[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
-        preprocess_distro["Type"] = LABEL_ENCODER_DISTRO.inverse_transform(preprocess_distro["Type"])
-        preprocess_distro['Timestamp'] = pd.to_datetime(preprocess_client[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
-
-        combined_df = pd.concat([preprocess_client, preprocess_distro])
         combined_df.sort_index(inplace=True)
-        combined_df = combined_df[["Timestamp","Type","Montant","Origine","Destination","Montant","Outliers"]]
+        combined_df = combined_df[["Timestamp","Type","Montant","Origine","Destination","Outliers"]]
 
         output = io.BytesIO()
         combined_df.to_csv(output, index=False)
@@ -310,25 +329,41 @@ async def get_anomalies(request: Request):
         df.dropna(inplace=True)
         df_client = df[~df['Type'].isin(['CASHIN', 'CASHOUT'])]
         df_distro = df[~df['Type'].isin(['P2P', 'PAYMENT'])]
+
         preprocess_client = process_client(LABEL_ENCODER_CLIENT, LABEL_SCALER_CLIENT, df_client)
         preprocess_distro = process_distro(LABEL_ENCODER_DISTRO, LABEL_SCALER_DISTRO, df_distro)
 
-        outliers_client = CLIENT_MODEL.predict(preprocess_client)
-        outliers_distro = DISTRO_MODEL.predict(preprocess_distro)
+        if preprocess_distro is not None:
+            outliers_distro = DISTRO_MODEL.predict(preprocess_distro)
+        else:
+            outliers_distro = None
+        
+        if preprocess_client is not None:
+            outliers_client = CLIENT_MODEL.predict(preprocess_client)
+        else:
+            outliers_client = None
 
-        preprocess_client["Outliers"] = outliers_client
-        preprocess_distro["Outliers"] = outliers_distro
+        if outliers_client is not None:
+            preprocess_client["Outliers"] = outliers_client
+            preprocess_client[COLUMNS_CLIENT] = LABEL_SCALER_CLIENT.inverse_transform(preprocess_client[COLUMNS_CLIENT])
+            preprocess_client["Type"] = LABEL_ENCODER_CLIENT.inverse_transform(preprocess_client["Type"])
+            preprocess_client['Timestamp'] = pd.to_datetime(preprocess_client[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
+        
+        if outliers_distro is not None:
+            preprocess_distro["Outliers"] = outliers_distro
+            preprocess_distro[COLUMNS_DISTRO] = LABEL_SCALER_DISTRO.inverse_transform(preprocess_distro[COLUMNS_DISTRO])
+            preprocess_distro["Type"] = LABEL_ENCODER_DISTRO.inverse_transform(preprocess_distro["Type"])
+            preprocess_distro['Timestamp'] = pd.to_datetime(preprocess_distro[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
 
-        preprocess_client[COLUMNS_CLIENT] = LABEL_SCALER_CLIENT.inverse_transform(preprocess_client[COLUMNS_CLIENT])
-        preprocess_distro[COLUMNS_DISTRO] = LABEL_SCALER_DISTRO.inverse_transform(preprocess_distro[COLUMNS_DISTRO])
-        preprocess_client["Type"] = LABEL_ENCODER_CLIENT.inverse_transform(preprocess_client["Type"])
-        preprocess_client['Timestamp'] = pd.to_datetime(preprocess_client[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
-        preprocess_distro["Type"] = LABEL_ENCODER_DISTRO.inverse_transform(preprocess_distro["Type"])
-        preprocess_distro['Timestamp'] = pd.to_datetime(preprocess_client[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']])
+        if preprocess_client is not None and preprocess_distro is not None:
+            combined_df = pd.concat([preprocess_client, preprocess_distro])
+        elif preprocess_client is None:
+            combined_df = preprocess_distro
+        elif preprocess_distro is None:
+            combined_df = preprocess_client
 
-        combined_df = pd.concat([preprocess_client, preprocess_distro])
         combined_df.sort_index(inplace=True)
-        combined_df = combined_df[["Timestamp","Type","Montant","Origine","Destination","Montant","Outliers"]]
+        combined_df = combined_df[["Timestamp","Type","Montant","Origine","Destination","Outliers"]]
 
         output = io.BytesIO()
         combined_df.to_csv(output, index=False)
