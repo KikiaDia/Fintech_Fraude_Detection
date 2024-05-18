@@ -16,6 +16,7 @@ st.sidebar.image('https://www.creativefabrica.com/wp-content/uploads/2021/07/05/
 st.title('🧠 Detection de Fraudes dans les transactions de Mobile Money 🦾')
 
 tab1, tab2 = st.tabs(["API", "Dashboard"])
+df2_exists = False
 
 with tab1:
   uploaded_file = st.file_uploader("Choose a file")
@@ -34,13 +35,16 @@ with tab1:
           content_io = io.BytesIO(response.content)
           st.success("Affichage du résultat en cours", icon='🦾')
           df2 = pd.read_csv(content_io)
+          df2_exists = True
           st.data_editor(df2, use_container_width=True)
     except Exception as e:
-      print(e)
       st.toast("N'uploadez que des fichiers csv", icon='❌')
 
 with tab2:
-  dataset = pd.read_csv('data.csv')
+  if df2_exists:
+    dataset = df2
+  else:
+    dataset = pd.read_csv('data.csv')
   dataset['Timestamp'] = pd.to_datetime(dataset['Timestamp'])
   dataset['Type'] = dataset['Type'].astype(str)
   dataset.dropna(inplace=True)
@@ -67,3 +71,17 @@ with tab2:
   fig_line = px.line(pivot_data, x='Date', y=pivot_data.columns[1:], title='Distribution des types de Transaction par Date')
   fig_line.update_layout(xaxis_title='Date', yaxis_title='Count')
   st.plotly_chart(fig_line, use_container_width=True, theme='streamlit')
+  # Montant des transactions
+  montant_sum = dataset.groupby('Type')['Montant'].sum().reset_index()
+  fig_bar = px.bar(montant_sum, x='Type', y='Montant', title='Montant total des transactions par type')
+  st.plotly_chart(fig_bar, use_container_width=True)
+  if df2_exists:
+    outliers_counts = dataset['Outliers'].value_counts()
+    labels = ['Suspectes', 'Normal']
+    fig_pie = px.pie(names=labels, values=outliers_counts, title='Distribution des transactions suspectes')
+    st.plotly_chart(fig_pie, use_container_width=True)
+
+    filtered_dataset = dataset[dataset['Outliers'] == -1]
+    montant_sum = filtered_dataset.groupby('Type')['Montant'].sum().reset_index()
+    fig_bar = px.bar(montant_sum, x='Type', y='Montant', title='Montant total des transactions suspectes par type')
+    st.plotly_chart(fig_bar, use_container_width=True)
