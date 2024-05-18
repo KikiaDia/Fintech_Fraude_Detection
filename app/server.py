@@ -4,7 +4,7 @@ from fastapi.exceptions import HTTPException
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from utils.preprocess_data import process_client, process_distro
+from app.utils.preprocess_data import process_client, process_distro
 import joblib
 import pandas as pd
 import io
@@ -21,7 +21,7 @@ warnings.filterwarnings("ignore")
 #LANGCHAIN--------------------------------------------------------------------------
 from langchain.prompts import ChatPromptTemplate
 from langchain_community.utilities import SQLDatabase
-from langchain_google_genai import GoogleGenerativeAI, ChatGoogleGenerativeAI
+# from langchain_google_genai import GoogleGenerativeAI, ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.runnables.history import RunnableWithMessageHistory
@@ -29,9 +29,9 @@ from langchain.agents.agent_toolkits.sql.toolkit import SQLDatabaseToolkit
 from langchain_core.prompts import MessagesPlaceholder
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_cohere import ChatCohere
-from langchain_elasticsearch import ElasticsearchChatMessageHistory
-from langchain_openai import ChatOpenAI
+# from langchain_cohere import ChatCohere
+# from langchain_elasticsearch import ElasticsearchChatMessageHistory
+# from langchain_openai import ChatOpenAI
 
 from langchain_groq import ChatGroq
 
@@ -78,9 +78,20 @@ def run_query(query):
 
 #--------------------------------------------------------------------------------------
 
-
+#GOOGLE API SETUP----------------------------------------------------------------------
 with open('api_key.json') as config_file:
     config = json.load(config_file)
+    
+# google_api_key = config['google_api_key']
+# llm = GoogleGenerativeAI(
+#     model="gemini-pro", 
+#     google_api_key=google_api_key,
+#     # callbacks=[my_handler],
+#     # streaming=True
+#     # verbose=True
+#     )
+#--------------------------------------------------------------------------------------
+
 #GROQ SETUP---------------------------------------------------------------------------------------------
 groq_api_key=config['groq_api_key']
 llm = ChatGroq(
@@ -208,8 +219,6 @@ full_chain = (
     | prompt_sql2nl
     | llm
     
-    
-    # | my_handler
 )
 
 store = {}
@@ -237,14 +246,14 @@ add_routes(app,
 
 #Anomaly Detection --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-LABEL_ENCODER_DISTRO = joblib.load("models/distributeur/distro_encoder.joblib")
-LABEL_SCALER_DISTRO = joblib.load("models/distributeur/distro_scaler.joblib")
+LABEL_ENCODER_DISTRO = joblib.load("app/models/distributeur/distro_encoder.joblib")
+LABEL_SCALER_DISTRO = joblib.load("app/models/distributeur/distro_scaler.joblib")
 
-LABEL_ENCODER_CLIENT = joblib.load("models/client/client_encoder.joblib")
-LABEL_SCALER_CLIENT = joblib.load("models/client/client_scaler.joblib")
+LABEL_ENCODER_CLIENT = joblib.load("app/models/client/client_encoder.joblib")
+LABEL_SCALER_CLIENT = joblib.load("app/models/client/client_scaler.joblib")
 
-DISTRO_MODEL = joblib.load("models/distributeur/distro_anomaly_detection.joblib")
-CLIENT_MODEL = joblib.load("models/client/client_anomaly_detection.joblib")
+DISTRO_MODEL = joblib.load("app/models/distributeur/distro_anomaly_detection.joblib")
+CLIENT_MODEL = joblib.load("app/models/client/client_anomaly_detection.joblib")
 
 ALLOWED_EXTENSIONS = ['xlsx', 'xls', 'json', 'csv']
 COLUMNS_DISTRO = ['Montant','CashIn_AvgAmount','CashOut_AvgAmount']
